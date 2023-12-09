@@ -20,6 +20,7 @@ bool heatpumpInitialized = false;
 uint8_t ledTick = 0;
 const uint8_t ledTickPatternHpDisconnect[] = { HIGH, LOW, HIGH, LOW, HIGH, HIGH, HIGH, HIGH, LOW };
 const uint8_t ledTickPatternMqttDisconnect[] = { HIGH, HIGH, HIGH, LOW, LOW, LOW };
+auto since_start = std::chrono::steady_clock::now();
 
 bool initialize_wifi_access_point()
 {
@@ -38,9 +39,9 @@ bool initialize_wifi_access_point()
         }
         WiFi.begin(config.WifiSsid.c_str(), config.WifiPassword.c_str());
 
-        // Give us ~2 mins to re-establish a WiFi connection before we give up,
+        // Give us few mins to re-establish a WiFi connection before we give up,
         // just in case there's a power cut and the router needs time to boot.
-        for (int i = 0; i < 240; ++i)
+        for (int i = 0; i < 800; ++i)
         {
             if (WiFi.isConnected())
                 break;
@@ -51,12 +52,15 @@ bool initialize_wifi_access_point()
 
         if (!WiFi.isConnected())
         {
-            ehal::log_web(F("Couldn't connect to WiFi network on boot, falling back to AP mode."));
+            ehal::log_web(F("Couldn't connect to WiFi network, restarting."));
+            /* 
             config.WifiPassword.clear();
             config.WifiSsid.clear();
             ehal::save_configuration(config);
+            */
             ESP.restart();
         }
+  
     }
 
     if (ehal::requires_first_time_configuration())
@@ -205,6 +209,14 @@ void setup()
 
 void loop()
 {
+    auto now = std::chrono::steady_clock::now();
+
+    if (now - since_start > std::chrono::hours(24))
+    {
+      ehal::log_web(F("24h uptime timer expired - restarting.."));
+      ESP.restart();
+    }
+
     try
     {
         ehal::ping_watchdog();
@@ -216,6 +228,12 @@ void loop()
 
         if (mqttInitialized)
             ehal::mqtt::handle_loop();
+
+        if (!WiFi.isConnected())
+        {
+            ehal::log_web(F("WiFi connection lost, attempting reconnect"));
+            initialize_wifi_access_point();
+        }
 
         update_time(/* force =*/false);
         update_status_led();
